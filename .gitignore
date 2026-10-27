@@ -1,0 +1,43 @@
+# ---------- Secrets ----------
+# DB credentials etc. Never commit these.
+.env
+.env.*
+!.env.example
+
+# ---------- Backend (Django / Python) ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+db.sqlite3
+db.sqlite3-journal
+/ai_blog_app/staticfiles/
+/ai_blog_app/media/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------- Frontend (Bun / React) ----------
+node_modules/
+dist/
+out/
+*.tgz
+coverage/
+*.lcov
+.cache/
+.eslintcache
+*.tsbuildinfo
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Editors / OS ----------
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
