@@ -1,1 +1,5 @@
 In production when many people are using our app in that case becuse of transcript those request by backend server becomes overwelmed we add those requests into queue and make backend to process them one by one
+
+
+used open-ai wishper for transcript the video
+
