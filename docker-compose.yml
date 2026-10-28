@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16
+    # Reuse the backend's DB_* credentials so they live in one file; the
+    # postgres image expects them as POSTGRES_*.
+    env_file: ./ai_blog_app/.env
+    entrypoint: >
+      sh -c 'export POSTGRES_DB="$$DB_NAME" POSTGRES_USER="$$DB_USER" POSTGRES_PASSWORD="$$DB_PASSWORD"
+      && exec docker-entrypoint.sh postgres'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$DB_USER\" -d \"$$DB_NAME\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./ai_blog_app
+    env_file: ./ai_blog_app/.env
+    environment:
+      # Inside the compose network Postgres is reachable as "db" on its default port,
+      # whatever DB_HOST/DB_PORT say in .env for local development.
+      DB_HOST: db
+      DB_PORT: "5432"
+    # Not published: nginx reaches it as backend:8000 on the compose network.
+    expose:
+      - "8000"
+    volumes:
+      # Keep the downloaded Whisper model between container restarts.
+      - whisper_cache:/root/.cache/whisper
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      # Call the API through nginx on the same origin (see nginx/default.conf).
+      BUN_PUBLIC_API_URL: /api
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:1.27
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
+  whisper_cache:
