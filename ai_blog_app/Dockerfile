@@ -22,6 +22,7 @@ COPY . .
 
 EXPOSE 8000
 
-# Apply migrations, then serve. Generating a blog (download + transcribe + LLM)
-# can take minutes, so give workers a long timeout.
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn ai_blog_app.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 600"]
+# Apply migrations, then serve. Requests are quick now that blog generation runs
+# in the Celery worker, so Gunicorn's default 30s timeout applies.
+# (The worker service in docker-compose.yml overrides this command.)
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn ai_blog_app.wsgi:application --bind 0.0.0.0:8000 --workers 2"]

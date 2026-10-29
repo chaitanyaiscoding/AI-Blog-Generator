@@ -1,7 +1,10 @@
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient, APITestCase
 
 from .models import Blog
+from .tasks import generate_blog
 
 
 class AuthTests(APITestCase):
@@ -118,12 +121,54 @@ class BlogTests(APITestCase):
         self.assertEqual(res.status_code, 400)
         self.assertIn('url', res.data)
 
-    def test_create_is_not_implemented_yet_and_saves_nothing(self):
+    @patch('blog_generator.views.generate_blog.delay')
+    def test_create_saves_pending_blog_and_queues_it_after_commit(self, delay):
         self.client.force_authenticate(self.alice)
-        res = self.client.post('/blogs/', {'url': 'https://example.com'}, format='json')
-        self.assertEqual(res.status_code, 501)
-        self.assertEqual(Blog.objects.filter(user=self.alice).count(), 1)
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            res = self.client.post('/blogs/', {'url': 'https://example.com'}, format='json')
+        self.assertEqual(res.status_code, 202)
+        self.assertEqual(res.data['status'], 'pending')
+        self.assertEqual(res.data['content'], '')
+        # Nothing is published until the transaction commits.
+        delay.assert_not_called()
+        for callback in callbacks:
+            callback()
+        delay.assert_called_once_with(res.data['id'])
+
+    def test_detail_returns_my_blog(self):
+        self.client.force_authenticate(self.alice)
+        blog = Blog.objects.get(user=self.alice)
+        res = self.client.get(f'/blogs/{blog.id}/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['content'], 'Alice blog')
+
+    def test_detail_hides_other_users_blogs(self):
+        self.client.force_authenticate(self.alice)
+        blog = Blog.objects.get(user=self.bob)
+        self.assertEqual(self.client.get(f'/blogs/{blog.id}/').status_code, 404)
 
     def test_all_blogs_is_read_only(self):
         self.client.force_authenticate(self.alice)
         self.assertEqual(self.client.post('/blogs/all/', {'url': 'https://x.com'}, format='json').status_code, 405)
+
+
+class GenerateBlogTaskTests(APITestCase):
+    def setUp(self):
+        user = User.objects.create_user('alice', 'alice@example.com', 'S3cure-pass-123')
+        self.blog = Blog.objects.create(user=user, url='https://youtu.be/x')
+
+    @patch('blog_generator.generation.generate_blog_content', return_value='An article')
+    def test_saves_content_on_success(self, generate_content):
+        generate_blog(self.blog.id)
+        self.blog.refresh_from_db()
+        generate_content.assert_called_once_with('https://youtu.be/x')
+        self.assertEqual(self.blog.status, Blog.Status.COMPLETED)
+        self.assertEqual(self.blog.content, 'An article')
+
+    @patch('blog_generator.generation.generate_blog_content', side_effect=RuntimeError('Video unavailable'))
+    def test_records_error_on_failure(self, generate_content):
+        with self.assertLogs('blog_generator.tasks', 'ERROR'):
+            generate_blog(self.blog.id)
+        self.blog.refresh_from_db()
+        self.assertEqual(self.blog.status, Blog.Status.FAILED)
+        self.assertEqual(self.blog.error, 'Video unavailable')

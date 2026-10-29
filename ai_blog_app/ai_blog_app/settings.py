@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 
@@ -155,3 +156,21 @@ FRONTEND_ORIGINS = [
 CORS_ALLOWED_ORIGINS = FRONTEND_ORIGINS
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = FRONTEND_ORIGINS
+
+
+# Celery: blog generation runs in a separate worker that takes jobs from RabbitMQ.
+# The RABBITMQ_DEFAULT_* names are the ones the rabbitmq image uses to create its user.
+CELERY_BROKER_URL = 'amqp://{user}:{password}@{host}:{port}//'.format(
+    user=quote(os.environ.get('RABBITMQ_DEFAULT_USER', 'guest'), safe=''),
+    password=quote(os.environ.get('RABBITMQ_DEFAULT_PASS', 'guest'), safe=''),
+    host=os.environ.get('RABBITMQ_HOST', 'localhost'),
+    port=os.environ.get('RABBITMQ_PORT', '5672'),
+)
+# Results are written to the Blog row, so Celery doesn't need a result backend.
+CELERY_TASK_IGNORE_RESULT = True
+# Ack a message only after the task finishes, so a worker that dies mid-job
+# leaves it on the queue for another worker instead of losing it.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Jobs take minutes: each worker process reserves only the job it is running.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1

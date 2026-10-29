@@ -15,22 +15,55 @@ services:
       timeout: 5s
       retries: 10
 
+  # Message broker: the backend publishes "generate this blog" jobs here and the
+  # worker consumes them. It creates its user from RABBITMQ_DEFAULT_USER/PASS in .env.
+  rabbitmq:
+    image: rabbitmq:4-management
+    env_file: ./ai_blog_app/.env
+    volumes:
+      # Keep queued messages if the container restarts.
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
   backend:
     build: ./ai_blog_app
     env_file: ./ai_blog_app/.env
-    environment:
-      # Inside the compose network Postgres is reachable as "db" on its default port,
-      # whatever DB_HOST/DB_PORT say in .env for local development.
+    environment: &service_env
+      # Inside the compose network Postgres is reachable as "db" and RabbitMQ as
+      # "rabbitmq" on their default ports, whatever .env says for local development.
       DB_HOST: db
       DB_PORT: "5432"
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
     # Not published: nginx reaches it as backend:8000 on the compose network.
     expose:
       - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # Runs the slow part (download, Whisper, OpenAI) from the queue. Same image as
+  # the backend. --concurrency is how many videos it transcribes at once; Whisper
+  # uses every CPU core, so keep it low and add workers to scale:
+  #   docker compose up -d --scale worker=2
+  worker:
+    build: ./ai_blog_app
+    command: celery -A ai_blog_app worker --loglevel=info --concurrency=1
+    env_file: ./ai_blog_app/.env
+    environment: *service_env
     volumes:
       # Keep the downloaded Whisper model between container restarts.
       - whisper_cache:/root/.cache/whisper
     depends_on:
       db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   frontend:
@@ -55,4 +88,5 @@ services:
 
 volumes:
   postgres_data:
+  rabbitmq_data:
   whisper_cache:
